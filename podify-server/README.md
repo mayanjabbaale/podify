@@ -113,7 +113,7 @@ Your phone and computer must be on the **same Wi-Fi network**.
 
 3. Test the connection from your browser or Postman:
 ```
-GET http://YOUR_LOCAL_IP:3000/health
+GET http://172.18.64.1:3000/health
 ```
 
 ---

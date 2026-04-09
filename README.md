@@ -36,15 +36,15 @@ Podify was built to bridge the gap between watching and internalizing. It’s a 
 
 <table>
   <tr>
-    <td width="33%"><img src="./screens-imgs/WhatsApp Image 2026-04-09 at 15.04.55.jpeg" alt="Login Screen" width="100%" /></td>
-    <td width="33%"><img src="./screens-imgs/WhatsApp Image 2026-04-09 at 15.04.56 (1).jpeg" alt="Paste Link Screen" width="100%" /></td>
-    <td width="33%"><img src="./screens-imgs/WhatsApp Image 2026-04-09 at 15.04.56 (2).jpeg" alt="Conversion Animation" width="100%" /></td>
+    <td width="33%"><img src="./screens-imgs/1.jpeg" alt="Login Screen" width="100%" /></td>
+    <td width="33%"><img src="./screens-imgs/2.jpeg" alt="Paste Link Screen" width="100%" /></td>
+    <td width="33%"><img src="./screens-imgs/3.jpeg" alt="Conversion Animation" width="100%" /></td>
   </tr>
   <tr>
     <td colspan="3" align="center">
       <table width="66%"> <tr>
-            <td width="50%"><img src="./screens-imgs/WhatsApp Image 2026-04-09 at 15.04.56 (3).jpeg" alt="The Lock-In Player" width="100%" /></td>
-            <td width="50%"><img src="./screens-imgs/WhatsApp Image 2026-04-09 at 15.04.56.jpeg" alt="Offline Library" width="100%" /></td>
+            <td width="50%"><img src="./screens-imgs/4.jpeg" alt="The Lock-In Player" width="100%" /></td>
+            <td width="50%"><img src="./screens-imgs/5.jpeg" alt="Offline Library" width="100%" /></td>
           </tr>
       </table>
     </td>

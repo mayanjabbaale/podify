@@ -36,13 +36,13 @@ Podify was built to bridge the gap between watching and internalizing. It’s a 
 
 <p align="center">
   <strong>Home & Conversion Flow</strong><br><br>
-  <img src="./screens-imgs/1.jpeg" width="100" alt="Home" />
-  <img src="./screens-imgs/2.jpeg" width="100" alt="Paste Link" />
-  <img src="./screens-imgs/3.jpeg" width="100" alt="Processing" />
+  <img src="./screens-imgs/1.jpeg" width="200" alt="Home" />
+  <img src="./screens-imgs/2.jpeg" width="200" alt="Paste Link" />
+  <img src="./screens-imgs/3.jpeg" width="200" alt="Processing" />
 </p>
 
 <p align="center">
   <strong>Lock-In Player & Offline Library</strong><br><br>
-  <img src="./screens-imgs/4.jpeg" width="100" alt="Lock-In Player" />
-  <img src="./screens-imgs/5.jpeg" width="100" alt="Offline Library" />
+  <img src="./screens-imgs/4.jpeg" width="200" alt="Lock-In Player" />
+  <img src="./screens-imgs/5.jpeg" width="200" alt="Offline Library" />
 </p>

@@ -34,19 +34,15 @@ Podify was built to bridge the gap between watching and internalizing. It’s a 
 
 <!-- <img src="./screens-imgs/WhatsApp%20Image%202026-04-09%20at%2015.04.55.jpeg" width="400" height="full" /> -->
 
-<table>
-  <tr>
-    <td width="33%"><img src="./screens-imgs/1.jpeg" alt="Login Screen" width="100%" /></td>
-    <td width="33%"><img src="./screens-imgs/2.jpeg" alt="Paste Link Screen" width="100%" /></td>
-    <td width="33%"><img src="./screens-imgs/3.jpeg" alt="Conversion Animation" width="100%" /></td>
-  </tr>
-  <tr>
-    <td colspan="3" align="center">
-      <table width="66%"> <tr>
-            <td width="50%"><img src="./screens-imgs/4.jpeg" alt="The Lock-In Player" width="100%" /></td>
-            <td width="50%"><img src="./screens-imgs/5.jpeg" alt="Offline Library" width="100%" /></td>
-          </tr>
-      </table>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <strong>Home & Conversion Flow</strong><br><br>
+  <img src="./screens-imgs/1.jpeg" width="100" alt="Home" />
+  <img src="./screens-imgs/2.jpeg" width="100" alt="Paste Link" />
+  <img src="./screens-imgs/3.jpeg" width="100" alt="Processing" />
+</p>
+
+<p align="center">
+  <strong>Lock-In Player & Offline Library</strong><br><br>
+  <img src="./screens-imgs/4.jpeg" width="100" alt="Lock-In Player" />
+  <img src="./screens-imgs/5.jpeg" width="100" alt="Offline Library" />
+</p>

@@ -1,0 +1,45 @@
+# Local development services for Podify.
+#
+# Redis is the Celery broker + result backend (required).
+# Postgres is OPTIONAL — the app defaults to SQLite to match the 8GB-RAM
+# hardware target. Set DATABASE_URL=postgresql+psycopg://podify:podify@localhost:5432/podify
+# in .env to use Postgres instead.
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: podify-redis
+    # No host port mapping — only reachable from other compose services or
+    # from the host via `docker compose exec`. Don't expose 6379 publicly.
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: podify-postgres
+    environment:
+      POSTGRES_USER: podify
+      POSTGRES_PASSWORD: podify
+      POSTGRES_DB: podify
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U podify -d podify"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:
+  postgres_data:

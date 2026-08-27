@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Upload · Podify{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <header>
+        <h1 class="text-3xl font-bold tracking-tight">Upload a PDF</h1>
+        <p class="text-slate-600 mt-2">
+            Drop a PDF here or pick one from your computer. Chapter detection
+            and job submission land in M2 — this page is a placeholder for now.
+        </p>
+    </header>
+
+    <div class="bg-white rounded-lg border border-dashed border-slate-300 p-10 text-center">
+        <form>
+            <label class="block">
+                <span class="sr-only">Choose PDF</span>
+                <input
+                    type="file"
+                    accept="application/pdf"
+                    disabled
+                    class="block w-full text-sm text-slate-500
+                           file:mr-4 file:py-2 file:px-4
+                           file:rounded file:border-0
+                           file:text-sm file:font-semibold
+                           file:bg-slate-100 file:text-slate-700
+                           hover:file:bg-slate-200"
+                >
+            </label>
+            <p class="mt-3 text-xs text-slate-400">
+                Upload wired up in Milestone 2.
+            </p>
+        </form>
+    </div>
+</div>
+{% endblock %}

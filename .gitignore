@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Runtime / storage — never commit user PDFs or generated audio
+storage/pdfs/
+storage/audio/
+storage/tts_cache/
+storage/app.db
+storage/app.db-journal
+storage/app.db-wal
+storage/app.db-shm
+
+# Environment files — never commit secrets, even free-tier API keys
+.env
+.env.local

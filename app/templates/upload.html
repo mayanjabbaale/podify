@@ -7,19 +7,28 @@
     <header>
         <h1 class="text-3xl font-bold tracking-tight">Upload a PDF</h1>
         <p class="text-slate-600 mt-2">
-            Drop a PDF here or pick one from your computer. Chapter detection
-            and job submission land in M2 — this page is a placeholder for now.
+            Drop a PDF here or pick one from your computer. Podify extracts
+            the text, detects chapter boundaries, and shows the list below
+            ready for podcast or audiobook generation.
         </p>
     </header>
 
     <div class="bg-white rounded-lg border border-dashed border-slate-300 p-10 text-center">
-        <form>
+        <form
+            id="upload-form"
+            action="/api/books"
+            method="post"
+            enctype="multipart/form-data"
+            class="space-y-4"
+        >
             <label class="block">
                 <span class="sr-only">Choose PDF</span>
                 <input
+                    id="pdf-input"
                     type="file"
+                    name="file"
                     accept="application/pdf"
-                    disabled
+                    required
                     class="block w-full text-sm text-slate-500
                            file:mr-4 file:py-2 file:px-4
                            file:rounded file:border-0
@@ -28,10 +37,53 @@
                            hover:file:bg-slate-200"
                 >
             </label>
-            <p class="mt-3 text-xs text-slate-400">
-                Upload wired up in Milestone 2.
-            </p>
+            <button
+                type="submit"
+                class="inline-flex items-center px-4 py-2 rounded bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700 disabled:opacity-50"
+            >
+                Upload and extract
+            </button>
         </form>
+
+        <div id="upload-status" class="hidden mt-6 text-sm" aria-live="polite"></div>
     </div>
 </div>
+
+<script>
+(function () {
+    const form = document.getElementById("upload-form");
+    const statusEl = document.getElementById("upload-status");
+    const button = form.querySelector("button[type=submit]");
+
+    form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        const fileInput = document.getElementById("pdf-input");
+        if (!fileInput.files || !fileInput.files[0]) {
+            return;
+        }
+        const formData = new FormData();
+        formData.append("file", fileInput.files[0]);
+
+        button.disabled = true;
+        statusEl.classList.remove("hidden");
+        statusEl.textContent = "Uploading…";
+
+        try {
+            const res = await fetch("/api/books", {
+                method: "POST",
+                body: formData,
+            });
+            if (!res.ok) {
+                const detail = (await res.json().catch(() => ({}))).detail || res.statusText;
+                throw new Error(detail);
+            }
+            const body = await res.json();
+            window.location.href = body.detail_url;
+        } catch (err) {
+            statusEl.textContent = "Upload failed: " + err.message;
+            button.disabled = false;
+        }
+    });
+})();
+</script>
 {% endblock %}

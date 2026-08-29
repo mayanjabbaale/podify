@@ -1,7 +1,11 @@
 """FastAPI application factory and top-level routes.
 
 M1 scope: app factory, Jinja2 mount, /health, and a placeholder upload page
-so the root URL renders something. M2+ will add /api/books, /api/jobs, etc.
+so the root URL renders something.
+
+M2 scope: book upload + detail endpoints (see app.api_books), with the
+upload page now posting to the real handler and the book detail page
+polling for chapters while extraction is in flight.
 """
 
 from __future__ import annotations
@@ -14,6 +18,9 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.api_books import router as books_router
+from app.api_episodes import router as episodes_router
+from app.api_jobs import router as jobs_router
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.deps import get_redis_client
@@ -59,6 +66,10 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(request, "upload.html", {})
+
+    app.include_router(books_router)
+    app.include_router(jobs_router)
+    app.include_router(episodes_router)
 
     return app
 

@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+
+{% block title %}{{ book.title }} · Podify{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <header class="space-y-1">
+        <a href="/" class="text-sm text-slate-500 hover:text-slate-700">&larr; Upload another</a>
+        <h1 class="text-3xl font-bold tracking-tight">{{ book.title }}</h1>
+        <p class="text-sm text-slate-500">
+            {{ book.original_filename }} ·
+            uploaded {{ book.uploaded_at.strftime("%Y-%m-%d %H:%M UTC") }}
+        </p>
+        <p class="text-sm">
+            Status: <span id="book-status" class="font-mono">{{ book.status }}</span>
+        </p>
+    </header>
+
+    <section
+        id="extraction-banner"
+        class="{% if book.status == 'ready' or book.status == 'failed' %}hidden{% endif %}
+               bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-sm"
+    >
+        <p id="extraction-banner-text">
+            Extracting text and detecting chapters… this page will update automatically.
+        </p>
+    </section>
+
+    <section
+        id="failure-banner"
+        class="{% if book.status != 'failed' %}hidden{% endif %}
+               bg-red-50 border border-red-200 text-red-900 rounded-lg p-4 text-sm"
+    >
+        <p>
+            Extraction failed for this PDF. Check the file isn't corrupted
+            or password-protected, then re-upload.
+        </p>
+    </section>
+
+    <section id="chapters-section">
+        <h2 class="text-xl font-semibold mb-4">Chapters</h2>
+        <div id="chapters-empty" class="{% if chapters %}hidden{% endif %} text-sm text-slate-500">
+            No chapters detected yet.
+        </div>
+        <ol id="chapters-list" class="{% if not chapters %}hidden{% endif %} space-y-2">
+            {% for ch in chapters %}
+            <li
+                class="bg-white border border-slate-200 rounded-lg p-4 flex items-center justify-between gap-4"
+                data-chapter-id="{{ ch.id }}"
+            >
+                <div class="min-w-0">
+                    <p class="font-medium truncate">{{ ch.index + 1 }}. {{ ch.title }}</p>
+                    <p class="text-xs text-slate-500 mt-1">
+                        {{ ch.char_count }} chars · detected via {{ ch.detection_strategy or "unknown" }}
+                        {% if ch.latest_job %}· job: {{ ch.latest_job.status.value }}{% endif %}
+                    </p>
+                </div>
+                <div class="flex flex-col items-end gap-1 min-w-[10rem]">
+                    {% if ch.latest_job and ch.latest_job.status.value == "done" and ch.latest_job.episode_id %}
+                    <a
+                        href="/api/episodes/{{ ch.latest_job.episode_id }}/audio"
+                        target="_blank"
+                        rel="noopener"
+                        class="inline-flex items-center px-3 py-1.5 rounded bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+                    >Listen</a>
+                    <p class="text-xs text-slate-400">done</p>
+                    {% elif ch.latest_job and ch.latest_job.status.value not in ("done", "failed") %}
+                    <button
+                        type="button"
+                        disabled
+                        class="inline-flex items-center px-3 py-1.5 rounded bg-slate-300 text-slate-600 text-xs font-semibold cursor-not-allowed"
+                    >Generating…</button>
+                    {% if ch.latest_job.current_stage_detail %}
+                    <p class="text-xs text-slate-500 mt-1">{{ ch.latest_job.current_stage_detail }}</p>
+                    {% endif %}
+                    {% else %}
+                    <button
+                        type="button"
+                        data-chapter-id="{{ ch.id }}"
+                        class="generate-btn inline-flex items-center px-3 py-1.5 rounded bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+                    >{% if ch.latest_job and ch.latest_job.status.value == "failed" %}Retry audiobook{% else %}Generate Audiobook{% endif %}</button>
+                    {% if ch.latest_job and ch.latest_job.error_message %}
+                    <p class="text-xs text-red-600 mt-1">{{ ch.latest_job.error_message[:120] }}{% if ch.latest_job.error_message|length > 120 %}…{% endif %}</p>
+                    {% endif %}
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ol>
+    </section>
+</div>
+
+<script>
+(function () {
+    const bookId = {{ book.id }};
+    const statusEl = document.getElementById("book-status");
+    const bannerEl = document.getElementById("extraction-banner");
+    const bannerText = document.getElementById("extraction-banner-text");
+    const failureEl = document.getElementById("failure-banner");
+    const emptyEl = document.getElementById("chapters-empty");
+    const listEl = document.getElementById("chapters-list");
+
+    let stopped = false;
+
+    function jobIsTerminal(job) {
+        if (!job) return true;
+        return job.status === "done" || job.status === "failed";
+    }
+
+    function anyJobActive(chapters) {
+        return chapters.some(function (ch) {
+            return ch.latest_job && !jobIsTerminal(ch.latest_job);
+        });
+    }
+
+    async function poll() {
+        if (stopped) return;
+        try {
+            const res = await fetch(`/api/books/${bookId}`);
+            if (!res.ok) throw new Error("status " + res.status);
+            const body = await res.json();
+            statusEl.textContent = body.status;
+
+            if (body.status === "ready") {
+                bannerEl.classList.add("hidden");
+                failureEl.classList.add("hidden");
+                renderChapters(body.chapters);
+                // Continue polling while any chapter has a job in flight.
+                if (anyJobActive(body.chapters)) {
+                    setTimeout(poll, 1500);
+                } else {
+                    stopped = true;
+                }
+            } else if (body.status === "failed") {
+                stopped = true;
+                bannerEl.classList.add("hidden");
+                failureEl.classList.remove("hidden");
+            } else {
+                bannerText.textContent = `Status: ${body.status} — still working…`;
+                setTimeout(poll, 1500);
+            }
+        } catch (err) {
+            bannerText.textContent = "Lost connection to server, retrying…";
+            setTimeout(poll, 3000);
+        }
+    }
+
+    function chapterRowHtml(ch) {
+        const job = ch.latest_job;
+        const jobLabel = job ? job.status : null;
+
+        let action;
+        if (!job || job.status === "failed") {
+            // Idle or retry after failure.
+            const buttonText = job && job.status === "failed" ? "Retry audiobook" : "Generate Audiobook";
+            const errLine = job && job.error_message
+                ? `<p class="text-xs text-red-600 mt-1">${escapeHtml(truncate(job.error_message, 120))}</p>`
+                : "";
+            action = `
+                <div class="flex flex-col items-end gap-1">
+                    <button
+                        type="button"
+                        data-chapter-id="${ch.id}"
+                        class="generate-btn inline-flex items-center px-3 py-1.5 rounded bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+                    >${buttonText}</button>
+                    ${errLine}
+                </div>
+            `;
+        } else if (jobIsTerminal(job) && job.status === "done") {
+            const listenHref = job.episode_id
+                ? `/api/episodes/${job.episode_id}/audio`
+                : "#";
+            action = `
+                <div class="flex flex-col items-end gap-1">
+                    <a
+                        href="${listenHref}"
+                        target="_blank"
+                        rel="noopener"
+                        class="inline-flex items-center px-3 py-1.5 rounded bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+                    >Listen</a>
+                    <p class="text-xs text-slate-400">done</p>
+                </div>
+            `;
+        } else {
+            // queued / extracting / scripting / synthesizing / assembling
+            const detail = job.current_stage_detail
+                ? `<p class="text-xs text-slate-500 mt-1">${escapeHtml(job.current_stage_detail)}</p>`
+                : "";
+            action = `
+                <div class="flex flex-col items-end gap-1 min-w-[10rem]">
+                    <button
+                        type="button"
+                        disabled
+                        class="inline-flex items-center px-3 py-1.5 rounded bg-slate-300 text-slate-600 text-xs font-semibold cursor-not-allowed"
+                    >Generating…</button>
+                    <div class="w-full bg-slate-200 rounded h-1.5">
+                        <div class="bg-indigo-500 h-1.5 rounded" style="width: ${Math.max(2, Math.min(100, job.progress_pct || 0))}%"></div>
+                    </div>
+                    ${detail}
+                </div>
+            `;
+        }
+
+        return `
+            <li
+                class="bg-white border border-slate-200 rounded-lg p-4 flex items-center justify-between gap-4"
+                data-chapter-id="${ch.id}"
+            >
+                <div class="min-w-0">
+                    <p class="font-medium truncate">${ch.index + 1}. ${escapeHtml(ch.title)}</p>
+                    <p class="text-xs text-slate-500 mt-1">
+                        ${ch.char_count} chars · detected via ${escapeHtml(ch.detection_strategy || "unknown")}
+                        ${jobLabel ? `· job: ${escapeHtml(jobLabel)}` : ""}
+                    </p>
+                </div>
+                ${action}
+            </li>
+        `;
+    }
+
+    function renderChapters(chapters) {
+        if (!chapters || chapters.length === 0) {
+            emptyEl.classList.remove("hidden");
+            listEl.classList.add("hidden");
+            listEl.innerHTML = "";
+            return;
+        }
+        emptyEl.classList.add("hidden");
+        listEl.classList.remove("hidden");
+        listEl.innerHTML = chapters.map(chapterRowHtml).join("");
+        wireGenerateButtons();
+    }
+
+    function wireGenerateButtons() {
+        listEl.querySelectorAll(".generate-btn").forEach(function (btn) {
+            if (btn.dataset.wired === "1") return;
+            btn.dataset.wired = "1";
+            btn.addEventListener("click", async function () {
+                const chapterId = btn.dataset.chapterId;
+                btn.disabled = true;
+                btn.textContent = "Starting…";
+                try {
+                    const res = await fetch(
+                        `/api/books/${bookId}/chapters/${chapterId}/jobs`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ mode: "audiobook" }),
+                        }
+                    );
+                    if (!res.ok) {
+                        const detail = (await res.json().catch(() => ({}))).detail || res.statusText;
+                        throw new Error(detail);
+                    }
+                    // Kick off the next poll immediately so the row updates fast.
+                    setTimeout(poll, 250);
+                } catch (err) {
+                    btn.disabled = false;
+                    btn.textContent = "Retry audiobook";
+                    alert("Could not start job: " + err.message);
+                }
+            });
+        });
+    }
+
+    function truncate(s, n) {
+        if (!s) return "";
+        return s.length > n ? s.slice(0, n - 1) + "…" : s;
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+            return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+        });
+    }
+
+    // Initial wiring for the static Jinja-rendered buttons, then start polling
+    // if the book isn't ready yet.
+    wireGenerateButtons();
+    if (!stopped && (statusEl.textContent === "uploaded" || statusEl.textContent === "extracting")) {
+        setTimeout(poll, 1000);
+    } else if (!stopped && statusEl.textContent === "ready") {
+        // Book already extracted on page load — still poll once to surface
+        // any in-flight jobs that weren't visible at server-render time.
+        setTimeout(poll, 1000);
+    }
+})();
+</script>
+{% endblock %}

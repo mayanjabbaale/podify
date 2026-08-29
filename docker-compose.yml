@@ -9,10 +9,12 @@ services:
   redis:
     image: redis:7.4-alpine
     container_name: podify-redis
-    # No host port mapping — only reachable from other compose services or
-    # from the host via `docker compose exec`. Don't expose 6379 publicly.
-    expose:
-      - "6379"
+    # Bind 6379 to the loopback interface only — the app, Celery worker,
+    # and any redis-cli on the Windows host connect via localhost. Don't
+    # change to "0.0.0.0" or remove the host IP; that would expose Redis
+    # to the LAN with no auth.
+    ports:
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -29,8 +31,11 @@ services:
       POSTGRES_USER: podify
       POSTGRES_PASSWORD: podify
       POSTGRES_DB: podify
-    expose:
-      - "5432"
+    # Same loopback-only treatment as Redis. Switch to Postgres by setting
+    # DATABASE_URL=postgresql+psycopg://podify:podify@localhost:5432/podify
+    # in .env (see README).
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped

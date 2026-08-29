@@ -26,6 +26,10 @@ soundfile>=0.12
 
 # Audio assembly
 pydub>=0.25                    # ffmpeg must be on PATH for mp3 output
+audioop-lts>=0.2               # stdlib `audioop` was removed in Python 3.13;
+                               # pydub's utils.py imports `pyaudioop as audioop`,
+                               # and `audioop-lts` is the PyPI drop-in shim that
+                               # provides the `pyaudioop` import name.
 
 # Gemini (free tier)
 google-genai>=2.20,<3          # pin <3 to avoid upcoming AFC-breaking release

@@ -49,11 +49,10 @@ def _chapter_out(chapter: Chapter) -> ChapterOut:
     failed job stays attached so the UI can offer a Retry control; a
     successful job exposes its ``episode_id`` via ``latest_job.episode_id``.
     """
-    latest_job: Job | None = (
-        chapter.jobs.order_by(Job.created_at.desc()).first()
-        if chapter.jobs
-        else None
-    )
+    latest_job: Job | None = None
+    if chapter.jobs:
+        # Sort by created_at descending and take the first.
+        latest_job = sorted(chapter.jobs, key=lambda j: j.created_at, reverse=True)[0]
 
     job_out: JobOut | None = None
     if latest_job is not None:
@@ -68,6 +67,7 @@ def _chapter_out(chapter: Chapter) -> ChapterOut:
             created_at=latest_job.created_at,
             completed_at=latest_job.completed_at,
             episode_id=latest_job.episode.id if latest_job.episode is not None else None,
+            script_id=latest_job.script.id if latest_job.script is not None else None,
         )
 
     return ChapterOut(

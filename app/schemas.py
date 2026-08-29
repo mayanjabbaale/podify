@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.models import JobMode, JobStatus
 
@@ -30,6 +30,7 @@ class ChapterOut(BaseModel):
     regardless of status. The frontend uses this to render a three-state
     control (Generate / Generating / Listen) without a second fetch.
     """
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     book_id: int
@@ -42,6 +43,7 @@ class ChapterOut(BaseModel):
 
 class BookOut(BaseModel):
     """Read shape for a book row, including its chapter list."""
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     title: str
@@ -65,7 +67,9 @@ class JobOut(BaseModel):
 
     ``episode_id`` is populated when the job has produced an Episode row
     (i.e. status == done); ``None`` otherwise.
+    ``script_id`` is populated for podcast-mode jobs once the script is generated.
     """
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     chapter_id: int
@@ -76,7 +80,24 @@ class JobOut(BaseModel):
     error_message: str | None
     created_at: datetime
     completed_at: datetime | None
-    episode_id: int | None
+    episode_id: int | None = None
+    script_id: int | None = None
+
+
+class PodcastScriptTurn(BaseModel):
+    """A single turn in a podcast script."""
+    speaker: str
+    text: str
+
+
+class PodcastScriptOut(BaseModel):
+    """Read shape for a generated podcast script."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    job_id: int
+    turns: list[PodcastScriptTurn]
+    created_at: datetime
+
 
 
 class JobCreateRequest(BaseModel):

@@ -32,7 +32,8 @@ from app.chapters import detect_chapters
 from app.config import get_settings
 from app.db import task_session
 from app.extraction import clean_text, extract_text
-from app.models import Book, Chapter, Episode, EpisodeFormat, Job, JobMode, JobStatus
+from app.models import Book, Chapter, Episode, EpisodeFormat, Job, JobMode, JobStatus, PodcastScript
+
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,97 @@ def extract_pdf(self, book_id: int) -> dict:
         session.close()
 
 
-# --- M3: single-voice audiobook synthesis -------------------------------------
+# --- M4: Podcast script generation --------------------------------------------
+
+
+@celery_app.task(
+    name="app.tasks.generate_podcast_script",
+    bind=True,
+    autoretry_for=(),
+    acks_late=True,
+)
+def generate_podcast_script_task(self, job_id: int) -> dict:
+    """Generate a two-host podcast script from a chapter's text using Gemini.
+
+    Lifecycle:
+        queued -> scripting -> done (for M4 verification)
+        * -> failed
+    """
+    session: Session = task_session()
+    try:
+        job = session.get(Job, job_id)
+        if job is None:
+            logger.warning("generate_podcast_script_task: job %s not found", job_id)
+            return {"job_id": job_id, "error": "not_found"}
+
+        if job.mode != JobMode.podcast:
+            logger.warning("generate_podcast_script_task: job %s is not podcast mode", job_id)
+            return {"job_id": job_id, "error": "invalid_mode"}
+
+        chapter = session.get(Chapter, job.chapter_id)
+        if chapter is None:
+            job.status = JobStatus.failed
+            job.error_message = "Chapter no longer exists"
+            session.commit()
+            return {"job_id": job_id, "error": "chapter_missing"}
+
+        # --- scripting -------------------------------------------------------
+        job.status = JobStatus.scripting
+        job.progress_pct = 10
+        job.current_stage_detail = "generating script with Gemini"
+        session.flush()
+
+        from app.scripting import generate_podcast_script
+
+        try:
+            turns = generate_podcast_script(chapter.cleaned_text)
+        except ValueError as e:
+            job.status = JobStatus.failed
+            job.error_message = str(e)
+            session.commit()
+            logger.warning("generate_podcast_script_task: scripting rejected for job %s: %s", job_id, e)
+            return {"job_id": job_id, "error": "scripting_rejected"}
+        except Exception as e:
+            job.status = JobStatus.failed
+            job.error_message = f"Gemini API error: {str(e)}"
+            session.commit()
+            logger.exception("generate_podcast_script_task: unhandled error for job %s", job_id)
+            return {"job_id": job_id, "error": "api_failure"}
+
+        # Persist the script
+        script = PodcastScript(
+            job_id=job.id,
+            turns=turns,
+        )
+        session.add(script)
+        session.flush()
+
+        # Transition to synthesizing
+        job.status = JobStatus.synthesizing
+        job.progress_pct = 30
+        job.current_stage_detail = "script generated, starting synthesis"
+        session.commit()
+
+        logger.info("generate_podcast_script_task: job %s script generated (%d turns), triggering synthesis", job_id, len(turns))
+
+        # Trigger synthesis
+        synthesize_podcast.delay(job.id)
+        return {"job_id": job_id, "script_id": script.id}
+
+    except Exception as e:
+        session.rollback()
+        try:
+            job = session.get(Job, job_id)
+            if job is not None and job.status not in (JobStatus.done, JobStatus.failed):
+                job.status = JobStatus.failed
+                job.error_message = f"Unhandled error: {str(e)}"
+                session.commit()
+        except Exception:
+            session.rollback()
+        logger.exception("generate_podcast_script_task: unhandled error for job %s", job_id)
+        raise
+    finally:
+        session.close()
 
 
 # Job.status values during which a second POST to create a job should be
@@ -343,13 +434,14 @@ def synthesize_audiobook(self, job_id: int) -> dict:
             "episode_id": episode.id,
             "duration_seconds": audio_seconds,
         }
-    except Exception:
+    except Exception as e:
         session.rollback()
         # Best-effort status write so the UI sees the failure.
         try:
             job = session.get(Job, job_id)
             if job is not None and job.status not in (JobStatus.done, JobStatus.failed):
                 job.status = JobStatus.failed
+                job.error_message = f"Unhandled error: {str(e)}"
                 session.commit()
         except Exception:
             session.rollback()
@@ -360,6 +452,174 @@ def synthesize_audiobook(self, job_id: int) -> dict:
             except OSError:
                 logger.warning("Could not remove partial mp3 at %s", audio_path)
         logger.exception("synthesize_audiobook: unhandled error for job %s", job_id)
+        raise
+    finally:
+        session.close()
+
+
+# --- M5: Two-voice podcast synthesis and assembly -----------------------------------
+
+
+@celery_app.task(
+    name="app.tasks.synthesize_podcast",
+    bind=True,
+    autoretry_for=(),
+    acks_late=True,
+)
+def synthesize_podcast(self, job_id: int) -> dict:
+    """Synthesize a two-host podcast script and assemble the final audio.
+
+    Lifecycle:
+        synthesizing -> assembling -> done
+        * -> failed
+    """
+    settings = get_settings()
+    session: Session = task_session()
+    audio_path: Path | None = None
+    try:
+        job = session.get(Job, job_id)
+        if job is None:
+            logger.warning("synthesize_podcast: job %s not found", job_id)
+            return {"job_id": job_id, "error": "not_found"}
+
+        if job.mode != JobMode.podcast:
+            logger.warning("synthesize_podcast: job %s is not podcast mode", job_id)
+            return {"job_id": job_id, "error": "invalid_mode"}
+
+        script = session.query(PodcastScript).filter_by(job_id=job.id).one_or_none()
+        if script is None:
+            job.status = JobStatus.failed
+            job.error_message = "Podcast script missing"
+            session.commit()
+            return {"job_id": job_id, "error": "script_missing"}
+
+        # --- synthesizing ----------------------------------------------------------
+        job.status = JobStatus.synthesizing
+        job.progress_pct = 30
+        job.current_stage_detail = "synthesizing podcast turns"
+        session.flush()
+
+        from app.tts import synthesize_text
+
+        all_samples = []
+        sample_rate = 24000
+
+        for i, turn in enumerate(script.turns):
+            # Determine voice based on speaker
+            voice = (
+                settings.kokoro_voice_host_a
+                if turn["speaker"] == "host_a"
+                else settings.kokoro_voice_host_b
+            )
+
+            try:
+                samples, sr = synthesize_text(turn["text"], voice=voice)
+                all_samples.append(samples)
+                sample_rate = sr
+
+                # Update progress for long scripts
+                progress = 30 + int((i + 1) / len(script.turns) * 50)
+                job.progress_pct = min(progress, 80)
+                job.current_stage_detail = f"synthesizing turn {i+1}/{len(script.turns)}"
+                session.flush()
+            except ValueError as e:
+                # Turn text empty, etc.
+                job.status = JobStatus.failed
+                job.error_message = f"Turn {i+1} synthesis failed: {e}"
+                session.commit()
+                return {"job_id": job_id, "error": "turn_synthesis_failed"}
+
+        if not all_samples:
+            job.status = JobStatus.failed
+            job.error_message = "No audio synthesized for script"
+            session.commit()
+            return {"job_id": job_id, "error": "no_audio"}
+
+        # Concatenate all numpy arrays
+        full_audio = np.concatenate(all_samples)
+        audio_seconds = float(full_audio.shape[0]) / float(sample_rate)
+
+        # --- assembling ------------------------------------------------------------
+        job.status = JobStatus.assembling
+        job.progress_pct = 80
+        job.current_stage_detail = "encoding mp3"
+        session.flush()
+
+        audio_dir: Path = settings.storage_dir / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = audio_dir / f"episode_{job_id}.mp3"
+
+        try:
+            from pydub import AudioSegment  # type: ignore[import-untyped]
+        except Exception as e:
+            job.status = JobStatus.failed
+            job.error_message = f"pydub import failed: {e}"
+            session.commit()
+            return {"job_id": job_id, "error": "pydub_unavailable"}
+
+        segment = AudioSegment(
+            full_audio.tobytes(),
+            frame_rate=sample_rate,
+            sample_width=4,  # float32
+            channels=1,
+        )
+        try:
+            segment.export(str(audio_path), format="mp3", bitrate="128k")
+        except Exception as e:
+            hint = " (ffmpeg not found on PATH)" if shutil.which("ffmpeg") is None else ""
+            job.status = JobStatus.failed
+            job.error_message = f"mp3 export failed{hint}: {e}"
+            session.commit()
+            return {"job_id": job_id, "error": "export_failed"}
+
+        # --- Episode row ------------------------------------------------------------
+        now = datetime.utcnow()
+        episode = Episode(
+            job_id=job.id,
+            storage_path=str(audio_path),
+            duration_seconds=audio_seconds,
+            format=EpisodeFormat.mp3,
+            metadata_json={
+                "voice_a": settings.kokoro_voice_host_a,
+                "voice_b": settings.kokoro_voice_host_b,
+                "sample_rate": sample_rate,
+                "audio_seconds": audio_seconds,
+                "mode": JobMode.podcast.value,
+            },
+            created_at=now,
+            retention_until=now + timedelta(days=settings.retention_days),
+        )
+        session.add(episode)
+        session.flush()
+
+        job.status = JobStatus.done
+        job.progress_pct = 100
+        job.current_stage_detail = None
+        job.completed_at = datetime.utcnow()
+        session.commit()
+
+        logger.info("synthesize_podcast: job %s done (%.1fs, episode %s)", job_id, audio_seconds, episode.id)
+        return {
+            "job_id": job_id,
+            "episode_id": episode.id,
+            "duration_seconds": audio_seconds,
+        }
+    except Exception as e:
+        session.rollback()
+        try:
+            job = session.get(Job, job_id)
+            if job is not None and job.status not in (JobStatus.done, JobStatus.failed):
+                job.status = JobStatus.failed
+                job.error_message = f"Unhandled error: {str(e)}"
+                session.commit()
+        except Exception:
+            session.rollback()
+        if audio_path is not None and audio_path.exists():
+            try:
+                audio_path.unlink()
+            except OSError:
+                pass
+        logger.exception("synthesize_podcast: unhandled error for job %s", job_id)
         raise
     finally:
         session.close()

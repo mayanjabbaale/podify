@@ -19,7 +19,6 @@ from app import tts
 from app.config import get_settings
 from app.models import Episode, Job, JobStatus
 
-
 # --- helpers -----------------------------------------------------------------
 
 
@@ -162,13 +161,56 @@ def test_create_job_409_when_non_terminal(client, monkeypatch) -> None:
     assert second.status_code == 409
 
 
-def test_create_job_rejects_podcast_mode(client) -> None:
+def test_create_podcast_job_full_pipeline(client, monkeypatch) -> None:
+    """Verify the full podcast pipeline: Job -> Script -> Episode.
+    We mock the script generation to be deterministic.
+    """
+    def _mock_generate_script(text):
+        return [
+            {"speaker": "host_a", "text": "Hello!"},
+            {"speaker": "host_b", "text": "Hi!"}
+        ]
+
+    monkeypatch.setattr("app.scripting.generate_podcast_script", _mock_generate_script)
+
     book_id, chapter_ids = _upload_and_extract(client)
     res = client.post(
         f"/api/books/{book_id}/chapters/{chapter_ids[0]}/jobs",
         json={"mode": "podcast"},
     )
-    assert res.status_code == 400
+    assert res.status_code == 202
+    body = res.json()
+    assert body["mode"] == "podcast"
+    assert body["status"] == "done"
+    assert body["episode_id"] is not None
+    assert body["script_id"] is not None
+
+    # Verify episode exists
+    ep_res = client.get(f"/api/episodes/{body['episode_id']}/audio")
+    assert ep_res.status_code == 200
+
+
+def test_get_job_script_returns_script(client, monkeypatch) -> None:
+    """Verify the script retrieval endpoint."""
+    def _mock_generate_script(text):
+        return [
+            {"speaker": "host_a", "text": "Hello!"},
+            {"speaker": "host_b", "text": "Hi!"}
+        ]
+
+    monkeypatch.setattr("app.scripting.generate_podcast_script", _mock_generate_script)
+
+    book_id, chapter_ids = _upload_and_extract(client)
+    created = client.post(
+        f"/api/books/{book_id}/chapters/{chapter_ids[0]}/jobs",
+        json={"mode": "podcast"},
+    ).json()
+
+    res = client.get(f"/api/jobs/{created['id']}/script")
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["turns"]) == 2
+    assert body["turns"][0]["text"] == "Hello!"
 
 
 def test_create_job_404_for_unknown_book(client) -> None:
@@ -282,10 +324,10 @@ def test_synthesize_task_failure_marks_job_failed_and_cleans_mp3(client, monkeyp
     def _boom(text, voice, speed=1.0):
         raise RuntimeError("simulated synthesis crash")
 
-    monkeypatch.setattr("app.tasks.synthesize_text", _boom)
+    monkeypatch.setattr("app.tts.synthesize_text", _boom)
 
     with pytest.raises(RuntimeError, match="simulated"):
-        synthesize_audiobook.apply(args=(job_id,))
+        synthesize_audiobook.apply(args=(job_id,)).get()
 
     session = task_session()
     try:

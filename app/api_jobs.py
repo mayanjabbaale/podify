@@ -22,30 +22,38 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Book, Chapter, Job, JobMode, JobStatus
-from app.schemas import JobCreateRequest, JobOut
-from app.tasks import _NON_TERMINAL_JOB_STATUSES, synthesize_audiobook
+from app.models import Book, Chapter, Job, JobMode, JobStatus, PodcastScript
+from app.schemas import JobCreateRequest, JobOut, PodcastScriptOut
+from app.tasks import _NON_TERMINAL_JOB_STATUSES, synthesize_audiobook, generate_podcast_script_task
+
 
 router = APIRouter()
 
 
 # Modes the API will accept right now. Extend this set as M4/M5 land.
-_SUPPORTED_MODES_FOR_NOW: frozenset[JobMode] = frozenset({JobMode.audiobook})
+_SUPPORTED_MODES_FOR_NOW: frozenset[JobMode] = frozenset({JobMode.audiobook, JobMode.podcast})
 
 
-def _serialize_job(job: Job, episode_id: int | None) -> JobOut:
-    return JobOut(
-        id=job.id,
-        chapter_id=job.chapter_id,
-        mode=job.mode,
-        status=job.status,
-        progress_pct=job.progress_pct,
-        current_stage_detail=job.current_stage_detail,
-        error_message=job.error_message,
-        created_at=job.created_at,
-        completed_at=job.completed_at,
-        episode_id=episode_id,
-    )
+def _serialize_job(job: Job, episode_id: int | None) -> dict:
+    script_id = None
+    if hasattr(job, "script") and job.script is not None:
+        script_id = job.script.id
+
+    res = {
+        "id": job.id,
+        "chapter_id": job.chapter_id,
+        "mode": job.mode,
+        "status": job.status,
+        "progress_pct": job.progress_pct,
+        "current_stage_detail": job.current_stage_detail,
+        "error_message": job.error_message,
+        "created_at": job.created_at,
+        "completed_at": job.completed_at,
+        "episode_id": episode_id,
+        "script_id": script_id,
+    }
+    print(f"DEBUG: _serialize_job result: {res}")
+    return res
 
 
 @router.post(
@@ -111,7 +119,9 @@ def create_job(
 
     if payload.mode == JobMode.audiobook:
         synthesize_audiobook.delay(job.id)
-    # Podcast dispatch lands in M5.
+    elif payload.mode == JobMode.podcast:
+        generate_podcast_script_task.delay(job.id)
+
 
     # Eager-mode Celery (tests) runs the task synchronously and mutates the
     # DB row in a separate session. Our ``db`` session's identity map still
@@ -133,3 +143,17 @@ def get_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
 
     episode_id = job.episode.id if job.episode is not None else None
     return _serialize_job(job, episode_id)
+
+
+@router.get("/api/jobs/{job_id}/script", response_model=PodcastScriptOut)
+def get_job_script(job_id: int, db: Session = Depends(get_db)) -> PodcastScriptOut:
+    """Retrieve the generated podcast script for a job."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if job.mode != JobMode.podcast:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Job is not in podcast mode")
+    if job.script is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Script not yet generated")
+
+    return PodcastScriptOut.model_validate(job.script)
